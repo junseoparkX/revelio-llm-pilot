@@ -99,7 +99,14 @@ def _write_references(sample: pd.DataFrame, args: argparse.Namespace) -> None:
 def _sample_existing(frame: pd.DataFrame, n: int, seed: int) -> pd.DataFrame:
     if n <= 0 or n > len(frame):
         raise ValueError(f"n must be between 1 and {len(frame)}")
-    strata = [column for column in ("summary_group", "sample_stratum", "filter_priority") if column in frame.columns]
+    # Prefer design strata that were fixed before review. Outcome labels such as
+    # summary_group are only a last resort, so sampling does not quietly depend
+    # on the answers being evaluated.
+    strata = [
+        column
+        for column in ("review_stratum", "sample_stratum", "filter_priority", "summary_group")
+        if column in frame.columns
+    ]
     if not strata:
         return frame.sample(n=n, random_state=seed)
 
@@ -142,7 +149,19 @@ def existing(args: argparse.Namespace) -> None:
         if "summary_group" in external.columns and "summary_group" not in frame.columns:
             frame = frame.merge(external[["job_id", "summary_group"]], on="job_id", how="left", validate="one_to_one")
     sample = _sample_existing(frame, args.n, args.seed).copy()
-    sample["pilot_stratum"] = "existing_instruction_check"
+    source_stratum = next(
+        (
+            column
+            for column in ("review_stratum", "sample_stratum", "filter_priority")
+            if column in sample.columns
+        ),
+        None,
+    )
+    sample["pilot_stratum"] = (
+        sample[source_stratum].fillna("").astype(str)
+        if source_stratum
+        else "REVIEWED_EXISTING"
+    )
     output = Path(args.output)
     output.parent.mkdir(parents=True, exist_ok=True)
     sample[INPUT_COLS + ["pilot_stratum"]].fillna("").to_csv(output, index=False)

@@ -1,7 +1,8 @@
 seed: 20260914
-max_retries: 2
+max_retries: 0
 timeout_seconds: 90
-max_cost_usd: 7.00
+max_output_tokens: 1000
+max_cost_usd: 6.50
 models:
   - name: mistral_small_4
     provider: mistral

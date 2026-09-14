@@ -77,6 +77,7 @@ class PrepareTests(unittest.TestCase):
             existing(args)
             sampled = pd.read_csv(root / "sample.csv", dtype={"job_id": str})
             self.assertEqual(set(sampled["job_id"]), {"1", "3"})
+            self.assertEqual(set(sampled["pilot_stratum"]), {"REVIEWED_EXISTING"})
             records = [json.loads(line) for line in (root / "private" / "labels.jsonl").read_text().splitlines()]
             self.assertEqual({record["job_id"] for record in records}, {"1", "3"})
 
@@ -91,6 +92,22 @@ class ProviderPayloadTests(unittest.TestCase):
         payload = post.call_args.kwargs["payload"]
         self.assertFalse(payload["store"])
         self.assertTrue(payload["text"]["format"]["strict"])
+
+    def test_provider_output_limits_use_native_fields(self):
+        openai_body = {"output": [{"content": [{"type": "output_text", "text": "{}"}]}], "usage": {}}
+        mistral_body = {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+        gemini_body = {"candidates": [{"content": {"parts": [{"text": "{}"}]}}], "usageMetadata": {}}
+        with patch.dict(os.environ, {
+            "OPENAI_API_KEY": "test", "MISTRAL_API_KEY": "test", "GEMINI_API_KEY": "test"
+        }), patch.object(providers, "_post", side_effect=[openai_body, mistral_body, gemini_body]) as post:
+            providers.call_openai("model", "system", "user", max_output_tokens=1000)
+            providers.call_mistral("model", "system", "user", max_output_tokens=1000)
+            providers.call_gemini("model", "system", "user", max_output_tokens=1000)
+        self.assertEqual(post.call_args_list[0].kwargs["payload"]["max_output_tokens"], 1000)
+        self.assertEqual(post.call_args_list[1].kwargs["payload"]["max_tokens"], 1000)
+        self.assertEqual(
+            post.call_args_list[2].kwargs["payload"]["generationConfig"]["maxOutputTokens"], 1000
+        )
 
     def test_missing_key_fails_before_http(self):
         with patch.dict(os.environ, {}, clear=True), patch.object(providers, "_post") as post:
@@ -146,7 +163,8 @@ class RunnerIntegrationTests(unittest.TestCase):
                 "pilot_stratum": "existing_instruction_check",
             }]).to_csv(root / "input.csv", index=False)
             (root / "config.yaml").write_text(
-                "seed: 7\nmax_retries: 1\ntimeout_seconds: 10\nmax_cost_usd: 1\nmodels:\n"
+                "seed: 7\nmax_retries: 1\ntimeout_seconds: 10\nmax_output_tokens: 1000\n"
+                "max_cost_usd: 1\nmodels:\n"
                 "  - name: mock_openai\n    provider: openai\n    model_id: test-model\n"
                 "    input_usd_per_million: 0.2\n    output_usd_per_million: 1.2\n",
                 encoding="utf-8",

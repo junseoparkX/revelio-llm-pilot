@@ -77,29 +77,51 @@ The workbook does not include the full job descriptions. It includes short evide
 
 ## How the pilot is run
 
-### 1. Check the instructions on 50 existing cases
+### 1. Use all 300 saved review cases
 
-Fifty previously reviewed postings are used to find unclear instructions and common mistakes. These results are for prompt development, not final performance estimates.
+The pilot uses the same 300 postings summarized in the research report. No new 100-case test is added. Using the entire saved review set avoids throwing away already reviewed examples and keeps every original search group in the model comparison.
 
-### 2. Freeze the instructions
+The 300 postings have the following composition:
 
-The code records a digital fingerprint of the prompt and output format. If either changes, the final test will stop. This prevents quiet changes after seeing the test cases.
+| Review stratum | Cases | Why it is included |
+|---|---:|---|
+| **P1 — role aligned** | 40 | Strong AI-search signals in a marketing, search, content, or related role. |
+| **P1 — technical or unclear** | 45 | AI-search words appear, but the occupation or context makes interpretation harder. |
+| **P2 — SEO title or occupation** | 45 | Strong conventional SEO cases without an earlier P1 assignment. |
+| **P3 — AI plus relevant work context** | 45 | Broader AI/search context that may or may not describe an actual AI-search duty. |
+| **P4 — other related descriptions** | 45 | Broad boundary cases retained to check what P1–P3 miss. |
+| **Outside — related role** | 40 | Relevant-looking jobs rejected by the filter; useful for false-negative checks. |
+| **Outside — random** | 20 | A broad random negative-control check outside the candidate filter. |
+| **Outside — hard negative** | 20 | Keyword-like mentions that should normally remain negative. |
+| **Total** | **300** | |
 
-### 3. Test 100 new cases
+P1 therefore contributes 85 cases and all outside groups together contribute 80. The original archive contained 32,972 P1, 13,188 P2, 4,793 P3, and 121,490 P4 candidate records. A further 110,100 records did not pass the P1–P4 conditions.
 
-The final test contains:
+The saved review found the following diagnostic rates:
 
-- 50 randomly selected candidate postings
-- 50 difficult or borderline postings
+| Original group | Reviewed | SEO duty: YES | AI-search duty: YES |
+|---|---:|---:|---:|
+| P1 | 85 | 37 (43.5%) | 36 (42.4%) |
+| P2 | 45 | 32 (71.1%) | 1 (2.2%) |
+| P3 | 45 | 13 (28.9%) | 3 (6.7%) |
+| P4 | 45 | 21 (46.7%) | 0 (0.0%) |
+| Outside P1–P4 | 80 | 5 (6.3%) | 0 (0.0%) |
+| **Total** | **300** | **108 (36.0%)** | **40 (13.3%)** |
 
-The two groups are reported separately. This prevents a deliberately difficult sample from being mistaken for the normal error rate.
+These percentages describe this deliberately structured review set. They are useful for comparing where models succeed or fail, but they are **not population prevalence estimates**. P1–P4 and the outside strata were intentionally sampled at different rates. Market-wide shares require either weighting from a probability sample or classification and validation of the larger archive.
 
-### 4. Compare three models
+The current saved judgments also should not be described as final independent human gold labels without an additional human adjudication step. The Excel workbook therefore reports reference-quality problems separately.
 
-Each model reads the same 150 postings. The full pilot therefore contains 450 initial calls:
+### 2. Freeze the instructions and keep the labels hidden
+
+The model input contains only the posting ID, titles, and description. It excludes the review answer and the P1/P2/P3/P4 assignment. The code records a digital fingerprint of the prompt and output format so the instructions cannot change quietly during the comparison.
+
+### 3. Compare three models on the same 300 postings
+
+Each model reads every posting once. With automatic retries disabled, the planned run contains exactly 900 initial calls:
 
 ```text
-150 postings × 3 models = 450 calls
+300 postings × 3 models = 900 calls
 ```
 
 The current candidates are:
@@ -108,9 +130,20 @@ The current candidates are:
 |---|---|---:|
 | [Mistral](https://docs.mistral.ai/models/mistral-small-4-0-26-03) | `mistral-small-2603` | $0.15 / $0.60 |
 | [OpenAI](https://developers.openai.com/api/docs/models/gpt-5.6-luna) | `gpt-5.6-luna` | $0.20 / $1.20 |
-| [Google](https://ai.google.dev/gemini-api/docs/models/gemini-3.5-flash-lite) | `gemini-3.5-flash-lite` | $0.30 / $2.50 |
+| [Google](https://ai.google.dev/gemini-api/docs/pricing) | `gemini-3.5-flash-lite` | $0.30 / $2.50 |
 
-The research report proposes a CAD 10 ceiling. The config uses a USD 7.00 stop as a conservative operating limit. Prices, exchange rates, taxes, and account access should be checked again immediately before a paid run.
+### Cost check in Canadian dollars
+
+The estimate below excludes retries. The default configuration sets `max_retries: 0`, limits each response to 1,000 output tokens, and stops new work at USD 6.50.
+
+| Token use per posting and model | Mistral total | OpenAI total | Google total | All 900 calls |
+|---|---:|---:|---:|---:|
+| 5,000 input + 600 output | USD 0.33 | USD 0.52 | USD 0.90 | **USD 1.75** |
+| 10,000 input + 1,000 output | USD 0.63 | USD 0.96 | USD 1.65 | **USD 3.24** |
+
+The locally assembled 300 descriptions average about 5,160 characters and the longest is about 14,983 characters, so the second row is deliberately conservative for ordinary text tokenization. Using the Bank of Canada rate for 11 September 2026, USD 1 = CAD 1.3866, the two scenarios are approximately **CAD 2.43** and **CAD 4.49**. The USD 6.50 hard stop corresponds to about **CAD 9.01** at that rate.
+
+Therefore, the planned 300 × 3 run is expected to remain below CAD 10 **before taxes and card/provider currency-conversion charges**. Prices and the exchange rate must be checked again immediately before the paid run. Failed calls can still be billed; because automatic retries are off, any manual rerun should be budgeted and reported separately.
 
 ## How the models are compared
 
@@ -154,29 +187,39 @@ Copy-Item .env.example .env
 
 Add the provider keys to the local `.env` file. Keys are checked before a run starts.
 
-Prepare the 50 instruction-check cases:
+Prepare all 300 reviewed cases. `data/reviewed_300_input.csv` must contain the posting text and the original `review_stratum`; `data/reviewed_300_labels.csv` must contain the saved answers with matching `job_id` values. These private files are intentionally excluded from Git:
 
 ```powershell
 python -m revelio_pilot.prepare existing `
-  --input data/llm_extraction_pilot_300_input.csv `
-  --reference-input data/review_labels.csv `
-  --reference-origin ai_provisional_error_discovery `
-  --n 50 --seed 20260914 `
-  --output data/pilot_existing_50.csv `
+  --input data/reviewed_300_input.csv `
+  --reference-input data/reviewed_300_labels.csv `
+  --reference-origin saved_review_pending_human_adjudication `
+  --n 300 --seed 20260914 `
+  --output data/pilot_reviewed_300.csv `
   --reference-output outputs/private_reference/reference_labels.jsonl
 ```
 
-Check the setup without spending money:
+Check that the setup resolves to 300 × 3 = 900 calls without spending money:
 
 ```powershell
 python -m revelio_pilot.run_pilot `
-  --input data/pilot_existing_50.csv `
+  --input data/pilot_reviewed_300.csv `
   --config configs/pilot.yaml `
   --phase instruction_check `
   --dry-run
 ```
 
-Run the models by removing `--dry-run`. After the prompt has been reviewed, prepare the new 100 cases and run the final phase with the recorded prompt hash. Full commands are available with `python -m revelio_pilot.prepare --help` and `python -m revelio_pilot.run_pilot --help`.
+The dry run prints the prompt hash. Use that exact value for the paid run:
+
+```powershell
+python -m revelio_pilot.run_pilot `
+  --input data/pilot_reviewed_300.csv `
+  --config configs/pilot.yaml `
+  --phase frozen_test `
+  --require-prompt-hash <PROMPT_SHA256>
+```
+
+Do not change the prompt after reviewing model results. Full options are available with `python -m revelio_pilot.prepare --help` and `python -m revelio_pilot.run_pilot --help`.
 
 Create the Excel evaluation:
 
@@ -185,7 +228,7 @@ python -m revelio_pilot.evaluate `
   --predictions outputs/runs/<RUN_ID>/predictions.jsonl `
   --failures outputs/runs/<RUN_ID>/failures.jsonl `
   --reference outputs/private_reference/reference_labels.jsonl `
-  --source data/pilot_new_100.csv `
+  --source data/pilot_reviewed_300.csv `
   --output outputs/runs/<RUN_ID>/evaluation
 ```
 
@@ -195,4 +238,4 @@ Raw Revelio files, job descriptions, labels, API keys, and run results are ignor
 
 ## Current status
 
-The code, sampling, prompt freeze, validation, retry accounting, Excel export, and evaluation can be tested without paid API calls. A real three-model comparison has not been run because API credentials have not been supplied.
+The code, 300-case preparation, stratum preservation, prompt freeze, validation, cost ceiling, Excel export, and evaluation can be tested without paid API calls. A real 900-call comparison has not been run because API credentials have not been supplied.

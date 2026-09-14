@@ -93,6 +93,9 @@ def validate_config(config: dict, require_keys: bool) -> None:
         names.append(model["name"])
     if len(names) != len(set(names)):
         raise ValueError("Model names must be unique")
+    max_output_tokens = config.get("max_output_tokens")
+    if not isinstance(max_output_tokens, int) or max_output_tokens <= 0:
+        raise ValueError("Config must define a positive integer max_output_tokens")
     if require_keys:
         missing = sorted(
             {
@@ -209,6 +212,8 @@ def main() -> None:
         "models": config["models"],
         "seed": config.get("seed"),
         "max_cost_usd": config.get("max_cost_usd"),
+        "max_retries": config.get("max_retries", 0),
+        "max_output_tokens": config["max_output_tokens"],
         "package_version": __version__,
         "started_at_utc": now_utc(),
         "expected_calls": expected_calls,
@@ -218,7 +223,7 @@ def main() -> None:
         existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         for key in (
             "phase", "input_sha256", "selected_jobs_sha256", "selected_rows", "prompt_sha256",
-            "schema_sha256", "models", "expected_calls",
+            "schema_sha256", "models", "max_retries", "max_output_tokens", "expected_calls",
         ):
             if existing_manifest.get(key) != manifest.get(key):
                 raise ValueError(f"Cannot resume run {run_id}: manifest mismatch for {key}")
@@ -261,7 +266,7 @@ def main() -> None:
             cumulative_output_tokens = 0
             cumulative_latency = 0.0
             cumulative_cost = 0.0
-            for attempt in range(int(config.get("max_retries", 2)) + 1):
+            for attempt in range(int(config.get("max_retries", 0)) + 1):
                 if max_cost is not None and total_cost >= float(max_cost):
                     stopped_for_budget = True
                     last_error = RuntimeError("cost ceiling reached before the next attempt")
@@ -274,6 +279,7 @@ def main() -> None:
                         SYSTEM_PROMPT,
                         user_prompt,
                         int(config.get("timeout_seconds", 90)),
+                        int(config["max_output_tokens"]),
                     )
                     input_tokens, output_tokens = usage_tokens(model["provider"], usage)
                     if input_tokens <= 0 or output_tokens <= 0:
@@ -317,7 +323,7 @@ def main() -> None:
                     break
                 except Exception as error:
                     last_error = error
-                    if attempt < int(config.get("max_retries", 2)):
+                    if attempt < int(config.get("max_retries", 0)):
                         time.sleep(min(2**attempt, 8))
 
             if last_error is not None:

@@ -40,7 +40,9 @@ def _post(url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout
     return body
 
 
-def call_openai(model_id: str, system: str, user: str, timeout: int = 90):
+def call_openai(
+    model_id: str, system: str, user: str, timeout: int = 90, max_output_tokens: int | None = None
+):
     payload = {
         "model": model_id,
         "store": False,
@@ -55,6 +57,8 @@ def call_openai(model_id: str, system: str, user: str, timeout: int = 90):
             }
         },
     }
+    if max_output_tokens is not None:
+        payload["max_output_tokens"] = max_output_tokens
     body = _post(
         "https://api.openai.com/v1/responses",
         headers={"Authorization": f"Bearer {_key('openai')}", "Content-Type": "application/json"},
@@ -74,7 +78,9 @@ def call_openai(model_id: str, system: str, user: str, timeout: int = 90):
     return text, body.get("usage", {}), body
 
 
-def call_mistral(model_id: str, system: str, user: str, timeout: int = 90):
+def call_mistral(
+    model_id: str, system: str, user: str, timeout: int = 90, max_output_tokens: int | None = None
+):
     payload = {
         "model": model_id,
         "temperature": 0,
@@ -84,6 +90,8 @@ def call_mistral(model_id: str, system: str, user: str, timeout: int = 90):
             "json_schema": {"name": "revelio_job_posting_judgment", "schema": PREDICTION_SCHEMA},
         },
     }
+    if max_output_tokens is not None:
+        payload["max_tokens"] = max_output_tokens
     body = _post(
         "https://api.mistral.ai/v1/chat/completions",
         headers={"Authorization": f"Bearer {_key('mistral')}", "Content-Type": "application/json"},
@@ -94,7 +102,9 @@ def call_mistral(model_id: str, system: str, user: str, timeout: int = 90):
     return text, body.get("usage", {}), body
 
 
-def call_gemini(model_id: str, system: str, user: str, timeout: int = 90):
+def call_gemini(
+    model_id: str, system: str, user: str, timeout: int = 90, max_output_tokens: int | None = None
+):
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": [{"text": user}]}],
@@ -103,6 +113,8 @@ def call_gemini(model_id: str, system: str, user: str, timeout: int = 90):
             "responseFormat": {"text": {"mimeType": "application/json", "schema": PREDICTION_SCHEMA}},
         },
     }
+    if max_output_tokens is not None:
+        payload["generationConfig"]["maxOutputTokens"] = max_output_tokens
     body = _post(
         f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent",
         headers={"Content-Type": "application/json", "x-goog-api-key": _key("gemini")},
@@ -116,14 +128,21 @@ def call_gemini(model_id: str, system: str, user: str, timeout: int = 90):
     return text, body.get("usageMetadata", {}), body
 
 
-def call(provider: str, model_id: str, system: str, user: str, timeout: int = 90):
+def call(
+    provider: str,
+    model_id: str,
+    system: str,
+    user: str,
+    timeout: int = 90,
+    max_output_tokens: int | None = None,
+):
     started = time.perf_counter()
     if provider == "openai":
-        output = call_openai(model_id, system, user, timeout)
+        output = call_openai(model_id, system, user, timeout, max_output_tokens)
     elif provider == "mistral":
-        output = call_mistral(model_id, system, user, timeout)
+        output = call_mistral(model_id, system, user, timeout, max_output_tokens)
     elif provider == "gemini":
-        output = call_gemini(model_id, system, user, timeout)
+        output = call_gemini(model_id, system, user, timeout, max_output_tokens)
     else:
         raise ValueError(f"Unknown provider: {provider}")
     return (*output, time.perf_counter() - started)
