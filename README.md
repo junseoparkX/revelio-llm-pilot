@@ -28,6 +28,54 @@ For each posting, the model sees only:
 
 It does not see the researcher's answer, the search group that found the posting, or another model's answer.
 
+## Exact English test prompt
+
+All three models receive the same English instructions below. This is the exact system prompt stored in `src/revelio_pilot/prompt.py`, not a simplified description. Keeping one common prompt makes the comparison fair.
+
+<details>
+<summary>Show the complete system prompt</summary>
+
+```text
+You are independently reviewing a job posting for a research study of employer demand for SEO and AI-search visibility work.
+
+Judge only CURRENT DUTIES assigned to the worker. Do not infer a duty from qualifications, prior experience, an employer description, a product description, page chrome, or keywords alone.
+
+SEO duty = improving a website's or content's organic visibility, ranking, indexing, discoverability, or traffic in external search engines.
+
+GEO duty = improving or measuring discovery, citations, recommendations, or inclusion in AI-generated answers or AI-search systems. Treat AEO and generative-engine optimization as GEO only when they refer to external AI-search visibility.
+
+Do NOT count internal product search/retrieval/ranking engineering, paid search or SEM alone, marketplace/app-store search alone, AI used only to create content, sales of SEO/GEO services, prior experience alone, qualification-only mentions, company capabilities, or geographic meanings of GEO.
+
+Assess SEO and GEO independently. A posting may contain one, both, neither, or insufficient evidence for either duty. If either duty cannot be resolved because the posting is missing, unreadable, materially incomplete, or contradictory, use UNCERTAIN for that duty and UNCERTAIN for summary_group. Do not turn missing evidence into NO.
+
+Centrality must be PRIMARY or SECONDARY when a duty is YES, NOT_APPLICABLE when it is NO, and UNCLEAR when it is UNCERTAIN.
+
+Evidence must be a short exact substring copied verbatim from the supplied title or description. Use an empty string when there is no evidence. Do not repair spelling, punctuation, capitalization, whitespace, or HTML entities inside a quote.
+
+seo_background_for_geo describes whether the posting connects prior SEO background to current GEO work: EXPLICIT, SUGGESTIVE, or NO_EVIDENCE. It does not claim that a worker actually changed occupations.
+
+adjacent_type is a concise uppercase category only when useful to explain excluded nearby work, such as PAID_SEARCH, INTERNAL_PRODUCT_SEARCH, MARKETPLACE_SEARCH, AI_CONTENT_CREATION, SALES_SERVICE, QUALIFICATION_ONLY, PAGE_CHROME, or GEOGRAPHIC_GEO. Otherwise return an empty string.
+
+text_completeness is FULL, PARTIAL, or UNREADABLE.
+
+Return only one JSON object matching the supplied schema. concise_rationale must be 1-3 sentences.
+```
+
+</details>
+
+For each of the 300 postings, the following English template supplies the case-specific text:
+
+```text
+JOB ID: {job_id}
+TITLE RAW: {title_raw}
+TRANSLATED TITLE: {jobtitle_translated}
+
+DESCRIPTION:
+{description}
+```
+
+The JSON field definitions and allowed values are enforced separately through the same structured-output schema for every provider. They are not copied into the prose prompt. The prompt and schema are fingerprinted together; the paid run stops if either one changes after freezing.
+
 ## What the model produces
 
 The model returns one structured record per posting. These are the main fields:
