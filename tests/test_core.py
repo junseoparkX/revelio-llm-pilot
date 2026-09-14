@@ -10,6 +10,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pandas as pd
+from openpyxl import load_workbook
 
 from revelio_pilot import providers
 from revelio_pilot import evaluate
@@ -126,6 +127,13 @@ class EvaluationTests(unittest.TestCase):
             self.assertTrue((root / "evaluation" / "confusion_matrices.csv").exists())
             quality = pd.read_csv(root / "evaluation" / "reference_quality.csv")
             self.assertTrue(quality.loc[0, "schema_or_logic_valid"])
+            workbook = load_workbook(root / "evaluation" / "pilot_results.xlsx", data_only=False)
+            self.assertEqual(
+                workbook.sheetnames,
+                ["Overview", "Posting results", "Disagreements", "Call quality", "Confusion matrices", "Reference quality", "Field guide"],
+            )
+            self.assertEqual(workbook["Posting results"]["A2"].value, "1")
+            self.assertEqual(workbook["Field guide"]["A2"].value, "seo_duty")
 
 
 class RunnerIntegrationTests(unittest.TestCase):

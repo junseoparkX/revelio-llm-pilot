@@ -6,12 +6,205 @@ import json
 from pathlib import Path
 
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.worksheet.table import Table, TableStyleInfo
 
 from .schema import validate_prediction
 
 
 LABEL_ORDER = ["YES", "NO", "UNCERTAIN"]
 GROUP_ORDER = ["SEO_ONLY", "GEO_ONLY", "BOTH", "NEITHER", "UNCERTAIN"]
+
+FIELD_DEFINITIONS = [
+    ("seo_duty", "Does the job assign current SEO work?", "YES, NO, or UNCERTAIN"),
+    ("geo_duty", "Does the job assign current AI-search visibility work (GEO/AEO)?", "YES, NO, or UNCERTAIN"),
+    ("seo_centrality", "How important is SEO in the role?", "PRIMARY, SECONDARY, NOT_APPLICABLE, or UNCLEAR"),
+    ("geo_centrality", "How important is GEO/AEO in the role?", "PRIMARY, SECONDARY, NOT_APPLICABLE, or UNCLEAR"),
+    ("seo_evidence", "Exact words from the posting that support the SEO decision.", "Blank when no evidence is present"),
+    ("geo_evidence", "Exact words from the posting that support the GEO/AEO decision.", "Blank when no evidence is present"),
+    ("required_prior_experience", "Prior experience requested by the employer, kept separate from current duties.", "Short text summary"),
+    ("prior_experience_evidence", "Exact words supporting the prior-experience summary.", "Blank when none is stated"),
+    ("seo_background_for_geo", "Whether the posting connects SEO background to current GEO work.", "EXPLICIT, SUGGESTIVE, or NO_EVIDENCE"),
+    ("adjacent_type", "Nearby but excluded work, such as paid search or internal product search.", "Short category or blank"),
+    ("text_completeness", "Whether enough posting text was available to judge the role.", "FULL, PARTIAL, or UNREADABLE"),
+    ("uncertainty_reason", "Why a duty could not be decided.", "Required when either duty is UNCERTAIN"),
+    ("summary_group", "One combined label for the posting.", "SEO_ONLY, GEO_ONLY, BOTH, NEITHER, or UNCERTAIN"),
+    ("concise_rationale", "A short explanation of the decision.", "One to three sentences"),
+]
+
+EXCEL_COLUMN_LABELS = {
+    "model_name": "Model", "n_scored": "Postings scored", "job_id": "Job ID",
+    "title_raw": "Original title", "jobtitle_translated": "Translated title",
+    "reference_origin": "Reference source", "pilot_stratum": "Sample group",
+    "seo_true": "Reference SEO", "seo_pred": "Model SEO",
+    "geo_true": "Reference AI search", "geo_pred": "Model AI search",
+    "group_true": "Reference combined group", "group_pred": "Model combined group",
+    "seo_evidence": "SEO evidence quote", "geo_evidence": "AI-search evidence quote",
+    "seo_centrality": "SEO importance", "geo_centrality": "AI-search importance",
+    "required_prior_experience": "Requested prior experience",
+    "prior_experience_evidence": "Prior-experience evidence quote",
+    "seo_background_for_geo": "SEO background linked to AI-search work",
+    "adjacent_type": "Nearby excluded work", "text_completeness": "Posting text quality",
+    "uncertainty_reason": "Reason for uncertainty", "concise_rationale": "Model explanation",
+    "seo_evidence_valid": "SEO quotation found", "geo_evidence_valid": "AI-search quotation found",
+    "seo_precision": "SEO precision", "seo_recall": "SEO recall", "seo_f1": "SEO F1",
+    "geo_precision": "AI-search precision", "geo_recall": "AI-search recall", "geo_f1": "AI-search F1",
+    "group_accuracy": "Combined-group accuracy", "estimated_cost_usd": "Estimated cost (USD)",
+    "mean_latency_seconds": "Mean time (seconds)",
+    "possible_duty_prior_confusions": "Possible duty/experience mix-ups",
+    "possible_duty_prior_confusion": "Possible duty/experience mix-up",
+    "input_tokens": "Input tokens", "output_tokens": "Output tokens",
+    "latency_seconds": "Time (seconds)", "attempts": "Attempts",
+    "successful_calls": "Successful calls", "terminal_failed_calls": "Failed calls",
+    "terminal_invalid_output_calls": "Invalid outputs", "failed_call_rate": "Failed-call rate",
+    "invalid_output_rate": "Invalid-output rate", "schema_or_logic_valid": "Reference structure valid",
+    "evidence_substrings_valid": "Reference quotations valid",
+    "schema_or_logic_errors": "Reference structure problems", "evidence_errors": "Reference quotation problems",
+    "plain_language_meaning": "Meaning", "values_or_format": "Allowed values or format", "field": "Field name",
+    "true_label": "Reference answer", "predicted_label": "Model answer", "count": "Number of postings",
+}
+
+
+def _clean_excel_value(value):
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        return ""
+    if isinstance(value, bool) or type(value).__name__ == "bool_":
+        return "Yes" if bool(value) else "No"
+    return value
+
+
+def _write_frame_sheet(workbook: Workbook, name: str, frame: pd.DataFrame) -> None:
+    sheet = workbook.create_sheet(name)
+    sheet.sheet_view.showGridLines = False
+    frame = frame.rename(columns=EXCEL_COLUMN_LABELS)
+    columns = list(frame.columns)
+    if not columns:
+        sheet["A1"] = "No records"
+        return
+    sheet.append(columns)
+    for row in frame.itertuples(index=False, name=None):
+        sheet.append([_clean_excel_value(value) for value in row])
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    for cell in sheet[1]:
+        cell.fill = header_fill
+        cell.font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in sheet.iter_rows(min_row=2):
+        for cell in row:
+            cell.font = Font(name="Arial", size=10)
+            cell.alignment = Alignment(vertical="top", wrap_text=False)
+    sheet.freeze_panes = "G2" if name in {"Posting results", "Disagreements"} else "A2"
+    sheet.auto_filter.ref = sheet.dimensions
+    if sheet.max_row > 1:
+        safe_name = "".join(character for character in name.title() if character.isalnum()) + "Table"
+        table = Table(displayName=safe_name, ref=sheet.dimensions)
+        table.tableStyleInfo = TableStyleInfo(
+            name="TableStyleMedium2", showFirstColumn=False, showLastColumn=False,
+            showRowStripes=True, showColumnStripes=False,
+        )
+        sheet.add_table(table)
+    for index, column in enumerate(columns, start=1):
+        values = [str(column)] + [str(_clean_excel_value(value)) for value in frame.iloc[:, index - 1].head(200)]
+        width = min(max(max(map(len, values)) + 2, 11), 42)
+        sheet.column_dimensions[get_column_letter(index)].width = width
+        if column.endswith(" rate") or column in {
+            "SEO precision", "SEO recall", "SEO F1", "AI-search precision", "AI-search recall",
+            "AI-search F1", "Combined-group accuracy",
+        }:
+            for cell in sheet[get_column_letter(index)][1:]:
+                cell.number_format = "0.0%"
+        elif column == "Estimated cost (USD)":
+            for cell in sheet[get_column_letter(index)][1:]:
+                cell.number_format = '"$"0.0000'
+        elif column in {"Time (seconds)", "Mean time (seconds)"}:
+            for cell in sheet[get_column_letter(index)][1:]:
+                cell.number_format = "0.00"
+    sheet.row_dimensions[1].height = 30
+    if name == "Field guide":
+        sheet.column_dimensions["A"].width = 30
+        sheet.column_dimensions["B"].width = 72
+        sheet.column_dimensions["C"].width = 54
+        for row in sheet.iter_rows(min_row=2, max_col=3):
+            for cell in row:
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+            sheet.row_dimensions[row[0].row].height = 32
+
+
+def write_excel_workbook(
+    output: Path,
+    per_model: pd.DataFrame,
+    scored: pd.DataFrame,
+    disagreements: pd.DataFrame,
+    call_quality: pd.DataFrame,
+    confusion: pd.DataFrame,
+    reference_quality: pd.DataFrame,
+) -> None:
+    workbook = Workbook()
+    overview = workbook.active
+    overview.title = "Overview"
+    overview.sheet_view.showGridLines = False
+    overview["A2"] = "LLM pilot results"
+    overview["A2"].font = Font(name="Arial", size=15, bold=True, color="1F1F1F")
+    overview["A3"] = "This workbook compares how the candidate models classified current SEO and AI-search duties in job postings."
+    overview["A3"].font = Font(name="Arial", size=10, italic=True, color="666666")
+    overview["A5"] = "How to read this file"
+    overview["A5"].font = Font(name="Arial", size=11, bold=True, color="1F4E78")
+    guidance = [
+        "Model summary shows overall accuracy, missed positive duties, speed, and estimated API cost.",
+        "Posting results contains one row for each posting-model pair and the exact evidence returned by the model.",
+        "Disagreements lists rows where the model differs from the reference review.",
+        "Call quality shows failures or invalid outputs. Reference quality checks whether the benchmark itself is usable.",
+        "The field guide defines every LLM output. UNCERTAIN is kept separate from NO.",
+    ]
+    for offset, note in enumerate(guidance, start=6):
+        overview.cell(offset, 1, note)
+        overview.cell(offset, 1).font = Font(name="Arial", size=10)
+    overview["A13"] = "Model summary"
+    overview["A13"].font = Font(name="Arial", size=11, bold=True, color="1F4E78")
+    summary_columns = [
+        "model_name", "n_scored", "seo_precision", "seo_recall", "seo_f1",
+        "geo_precision", "geo_recall", "geo_f1", "group_accuracy",
+        "estimated_cost_usd", "mean_latency_seconds", "possible_duty_prior_confusions",
+    ]
+    summary = per_model.reindex(columns=summary_columns).rename(columns=EXCEL_COLUMN_LABELS)
+    for col_index, value in enumerate(summary.columns, start=1):
+        overview.cell(14, col_index, value)
+    for row in summary.itertuples(index=False, name=None):
+        overview.append([_clean_excel_value(value) for value in row])
+    for cell in overview[14]:
+        cell.fill = PatternFill("solid", fgColor="1F4E78")
+        cell.font = Font(name="Arial", size=10, bold=True, color="FFFFFF")
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    for row in overview.iter_rows(min_row=15, max_row=overview.max_row):
+        for cell in row:
+            cell.font = Font(name="Arial", size=10)
+    for column in range(3, 10):
+        for row in range(15, overview.max_row + 1):
+            overview.cell(row, column).number_format = "0.0%"
+    for row in range(15, overview.max_row + 1):
+        overview.cell(row, 10).number_format = '"$"0.0000'
+        overview.cell(row, 11).number_format = "0.00"
+    overview.column_dimensions["A"].width = 36
+    for column in range(2, 13):
+        overview.column_dimensions[get_column_letter(column)].width = 16
+    overview.row_dimensions[14].height = 42
+    overview.freeze_panes = "A14"
+
+    _write_frame_sheet(workbook, "Posting results", scored)
+    _write_frame_sheet(workbook, "Disagreements", disagreements)
+    _write_frame_sheet(workbook, "Call quality", call_quality)
+    _write_frame_sheet(workbook, "Confusion matrices", confusion)
+    _write_frame_sheet(workbook, "Reference quality", reference_quality)
+    _write_frame_sheet(
+        workbook,
+        "Field guide",
+        pd.DataFrame(FIELD_DEFINITIONS, columns=["field", "plain_language_meaning", "values_or_format"]),
+    )
+    workbook.calculation.fullCalcOnLoad = True
+    workbook.calculation.forceFullCalc = True
+    workbook.save(output / "pilot_results.xlsx")
 
 
 def load_jsonl(path: str | Path, *, optional: bool = False) -> list[dict]:
@@ -145,6 +338,7 @@ def main() -> None:
         origins[job_id] = record.get("reference_origin", "")
 
     source_text = {}
+    source_titles = {}
     if args.source:
         source = load_table(args.source, args.source_sheet).fillna("")
         if "job_id" not in source.columns or "description" not in source.columns:
@@ -152,9 +346,14 @@ def main() -> None:
         if source["job_id"].duplicated().any():
             raise ValueError("job_id must be unique in the source table")
         for _, record in source.iterrows():
-            source_text[str(record["job_id"])] = "\n".join(
+            source_id = str(record["job_id"])
+            source_text[source_id] = "\n".join(
                 str(record.get(column, "")) for column in ("title_raw", "jobtitle_translated", "description")
             )
+            source_titles[source_id] = {
+                "title_raw": str(record.get("title_raw", "")),
+                "jobtitle_translated": str(record.get("jobtitle_translated", "")),
+            }
 
     rows = []
     for (job_id, model_name), record in predictions.items():
@@ -176,6 +375,8 @@ def main() -> None:
         rows.append(
             {
                 "job_id": job_id,
+                "title_raw": source_titles.get(job_id, {}).get("title_raw", ""),
+                "jobtitle_translated": source_titles.get(job_id, {}).get("jobtitle_translated", ""),
                 "reference_origin": origins.get(job_id, ""),
                 "pilot_stratum": record.get("pilot_stratum", ""),
                 "model_name": model_name,
@@ -187,6 +388,15 @@ def main() -> None:
                 "group_pred": prediction.get("summary_group"),
                 "seo_evidence": prediction.get("seo_evidence", ""),
                 "geo_evidence": prediction.get("geo_evidence", ""),
+                "seo_centrality": prediction.get("seo_centrality", ""),
+                "geo_centrality": prediction.get("geo_centrality", ""),
+                "required_prior_experience": prediction.get("required_prior_experience", ""),
+                "prior_experience_evidence": prediction.get("prior_experience_evidence", ""),
+                "seo_background_for_geo": prediction.get("seo_background_for_geo", ""),
+                "adjacent_type": prediction.get("adjacent_type", ""),
+                "text_completeness": prediction.get("text_completeness", ""),
+                "uncertainty_reason": prediction.get("uncertainty_reason", ""),
+                "concise_rationale": prediction.get("concise_rationale", ""),
                 "seo_evidence_valid": seo_valid,
                 "geo_evidence_valid": geo_valid,
                 "possible_duty_prior_confusion": duty_prior_proxy,
@@ -199,8 +409,10 @@ def main() -> None:
         )
 
     columns = [
-        "job_id", "reference_origin", "pilot_stratum", "model_name", "seo_true", "seo_pred",
+        "job_id", "title_raw", "jobtitle_translated", "reference_origin", "pilot_stratum", "model_name", "seo_true", "seo_pred",
         "geo_true", "geo_pred", "group_true", "group_pred", "seo_evidence", "geo_evidence",
+        "seo_centrality", "geo_centrality", "required_prior_experience", "prior_experience_evidence",
+        "seo_background_for_geo", "adjacent_type", "text_completeness", "uncertainty_reason", "concise_rationale",
         "seo_evidence_valid", "geo_evidence_valid", "possible_duty_prior_confusion",
         "input_tokens", "output_tokens", "latency_seconds", "estimated_cost_usd", "attempts",
     ]
@@ -261,7 +473,8 @@ def main() -> None:
                             "count": count,
                         }
                     )
-    pd.DataFrame(confusion_rows).to_csv(output / "confusion_matrices.csv", index=False)
+    confusion_frame = pd.DataFrame(confusion_rows)
+    confusion_frame.to_csv(output / "confusion_matrices.csv", index=False)
 
     model_names = sorted({key[1] for key in predictions} | {key[1] for key in failures})
     call_summary = []
@@ -284,7 +497,18 @@ def main() -> None:
                 "invalid_output_rate": safe_div(len(invalid_keys), attempted),
             }
         )
-    pd.DataFrame(call_summary).to_csv(output / "call_quality.csv", index=False)
+    call_quality_frame = pd.DataFrame(call_summary)
+    call_quality_frame.to_csv(output / "call_quality.csv", index=False)
+
+    write_excel_workbook(
+        output,
+        pd.DataFrame(per_model),
+        scored,
+        disagreements,
+        call_quality_frame,
+        confusion_frame,
+        reference_quality_frame,
+    )
 
     summary = {
         "rows_scored": len(scored),

@@ -19,3 +19,7 @@ outputs/*
 *.csv
 *.jsonl
 .DS_Store
+
+# Public files use synthetic examples only
+!examples/synthetic_records.jsonl
+!docs/example_pilot_results.xlsx
