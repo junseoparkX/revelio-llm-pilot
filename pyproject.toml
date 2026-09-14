@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "revelio-llm-pilot"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.2",
+    "openpyxl>=3.1",
+    "pyarrow>=17.0",
+    "PyYAML>=6.0",
+    "python-dotenv>=1.0",
+    "requests>=2.32",
+]
+
+[project.scripts]
+revelio-prepare = "revelio_pilot.prepare:main"
+revelio-run = "revelio_pilot.run_pilot:main"
+revelio-evaluate = "revelio_pilot.evaluate:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

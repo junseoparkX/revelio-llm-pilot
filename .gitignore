@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.ipynb_checkpoints/
+
+# Proprietary/local data
+data/*
+!data/README.md
+
+# Run outputs can contain posting text or judgments
+outputs/*
+!outputs/.gitkeep
+
+*.xlsx
+*.xls
+*.parquet
+*.csv
+*.jsonl
+.DS_Store
