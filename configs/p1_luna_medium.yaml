@@ -1,0 +1,16 @@
+seed: 20260919
+max_retries: 0
+timeout_seconds: 180
+max_output_tokens: 2500
+# This ceiling applies to each shard independently. With the recommended 32
+# shards, the aggregate hard stop is USD 64; the 300-case pilot extrapolates
+# to materially less than that, but the ceiling intentionally leaves room for
+# longer P1 descriptions and reasoning-token variation.
+max_cost_usd: 2.00
+models:
+  - name: gpt_5_6_luna_medium
+    provider: openai
+    model_id: gpt-5.6-luna
+    reasoning_effort: medium
+    input_usd_per_million: 0.20
+    output_usd_per_million: 1.20

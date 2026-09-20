@@ -100,8 +100,11 @@ def validate_prediction(obj: Any, source_text: str | None = None) -> list[str]:
                 errors.append(f"{prefix}_centrality must be PRIMARY or SECONDARY when duty is YES")
             if not evidence:
                 errors.append(f"{prefix}_evidence is required when duty is YES")
-        elif duty == "NO" and centrality != "NOT_APPLICABLE":
-            errors.append(f"{prefix}_centrality must be NOT_APPLICABLE when duty is NO")
+        elif duty == "NO":
+            if centrality != "NOT_APPLICABLE":
+                errors.append(f"{prefix}_centrality must be NOT_APPLICABLE when duty is NO")
+            if evidence:
+                errors.append(f"{prefix}_evidence must be empty when duty is NO")
         elif duty == "UNCERTAIN" and centrality != "UNCLEAR":
             errors.append(f"{prefix}_centrality must be UNCLEAR when duty is UNCERTAIN")
 
@@ -122,3 +125,19 @@ def validate_prediction(obj: Any, source_text: str | None = None) -> list[str]:
                 errors.append(f"{key} is not an exact substring of the supplied source text")
 
     return errors
+
+
+def normalize_prediction(obj: Any) -> tuple[Any, list[str]]:
+    """Drop provider-added keys while preserving the raw response separately.
+
+    Some structured-output implementations return every required field correctly
+    but also invent a symmetric field that is not part of the research schema.
+    The runner retains the provider response verbatim in raw_responses.jsonl and
+    records this deterministic normalization as a validation warning.
+    """
+    if not isinstance(obj, dict):
+        return obj, []
+    extra = sorted(set(obj) - set(REQUIRED_FIELDS))
+    cleaned = {key: obj[key] for key in REQUIRED_FIELDS if key in obj}
+    warnings = [f"removed unexpected fields: {extra}"] if extra else []
+    return cleaned, warnings

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import time
 from typing import Any
@@ -28,12 +29,27 @@ def _key(provider: str) -> str:
     value = os.environ.get(env_name, "").strip()
     if not value:
         raise RuntimeError(f"{env_name} is not set")
+    if any(character.isspace() for character in value):
+        raise RuntimeError(f"{env_name} contains whitespace; copy the raw key again")
+    if "\\_" in value:
+        raise RuntimeError(
+            f"{env_name} contains a Markdown escape (\\\\_); copy the raw key without backslashes"
+        )
     return value
 
 
 def _post(url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout: int) -> dict[str, Any]:
     response = requests.post(url, headers=headers, json=payload, timeout=timeout)
-    response.raise_for_status()
+    if not response.ok:
+        try:
+            detail = json.dumps(response.json(), ensure_ascii=False)
+        except (ValueError, TypeError):
+            detail = response.text
+        for secret in headers.values():
+            if len(secret) >= 12:
+                detail = detail.replace(secret, "[redacted]")
+        detail = detail.strip()[:2000] or "No response body"
+        raise RuntimeError(f"Provider HTTP {response.status_code}: {detail}")
     body = response.json()
     if not isinstance(body, dict):
         raise ValueError("Provider returned a non-object JSON response")
@@ -41,7 +57,12 @@ def _post(url: str, *, headers: dict[str, str], payload: dict[str, Any], timeout
 
 
 def call_openai(
-    model_id: str, system: str, user: str, timeout: int = 90, max_output_tokens: int | None = None
+    model_id: str,
+    system: str,
+    user: str,
+    timeout: int = 90,
+    max_output_tokens: int | None = None,
+    reasoning_effort: str | None = None,
 ):
     payload = {
         "model": model_id,
@@ -59,6 +80,8 @@ def call_openai(
     }
     if max_output_tokens is not None:
         payload["max_output_tokens"] = max_output_tokens
+    if reasoning_effort is not None:
+        payload["reasoning"] = {"effort": reasoning_effort}
     body = _post(
         "https://api.openai.com/v1/responses",
         headers={"Authorization": f"Bearer {_key('openai')}", "Content-Type": "application/json"},
@@ -73,8 +96,9 @@ def call_openai(
             if isinstance(content, dict) and content.get("type") == "output_text":
                 chunks.append(content.get("text", ""))
     text = "".join(chunks)
-    if not text:
-        raise ValueError("OpenAI response contained no output text")
+    # Let the runner checkpoint usage and the raw response before it marks an
+    # empty final answer as invalid. Reasoning-limit failures can still be
+    # billable, so raising here would lose their cost and audit trail.
     return text, body.get("usage", {}), body
 
 
@@ -110,7 +134,8 @@ def call_gemini(
         "contents": [{"role": "user", "parts": [{"text": user}]}],
         "generationConfig": {
             "temperature": 0,
-            "responseFormat": {"text": {"mimeType": "application/json", "schema": PREDICTION_SCHEMA}},
+            "responseMimeType": "application/json",
+            "responseJsonSchema": PREDICTION_SCHEMA,
         },
     }
     if max_output_tokens is not None:
@@ -135,10 +160,13 @@ def call(
     user: str,
     timeout: int = 90,
     max_output_tokens: int | None = None,
+    reasoning_effort: str | None = None,
 ):
     started = time.perf_counter()
     if provider == "openai":
-        output = call_openai(model_id, system, user, timeout, max_output_tokens)
+        output = call_openai(
+            model_id, system, user, timeout, max_output_tokens, reasoning_effort
+        )
     elif provider == "mistral":
         output = call_mistral(model_id, system, user, timeout, max_output_tokens)
     elif provider == "gemini":

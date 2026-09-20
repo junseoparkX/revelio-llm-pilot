@@ -1,0 +1,12 @@
+seed: 20260914
+max_retries: 0
+timeout_seconds: 90
+max_output_tokens: 1000
+max_cost_usd: 0.50
+models:
+  - name: gpt_5_6_luna_prompt_v2
+    provider: openai
+    model_id: gpt-5.6-luna
+    reasoning_effort: medium
+    input_usd_per_million: 0.20
+    output_usd_per_million: 1.20

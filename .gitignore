@@ -1,5 +1,9 @@
 .env
+.env.*
+!.env.example
 .venv/
+.artifact_verify/
+.artifact_workbook/
 __pycache__/
 *.pyc
 *.egg-info/
@@ -18,6 +22,8 @@ outputs/*
 *.parquet
 *.csv
 *.jsonl
+*.pem
+*.key
 .DS_Store
 
 # Public files use synthetic examples only

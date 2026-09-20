@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pandas as pd
 from openpyxl import Workbook
+from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -72,6 +73,8 @@ def _clean_excel_value(value):
         return ""
     if isinstance(value, bool) or type(value).__name__ == "bool_":
         return "Yes" if bool(value) else "No"
+    if isinstance(value, str):
+        return ILLEGAL_CHARACTERS_RE.sub("", value)
     return value
 
 
@@ -400,6 +403,9 @@ def main() -> None:
                 "seo_evidence_valid": seo_valid,
                 "geo_evidence_valid": geo_valid,
                 "possible_duty_prior_confusion": duty_prior_proxy,
+                "validation_warnings": " | ".join(record.get("validation_warnings", [])),
+                "evidence_substrings_valid": record.get("evidence_substrings_valid", True),
+                "provider_schema_exact": record.get("provider_schema_exact", True),
                 "input_tokens": record.get("input_tokens", 0),
                 "output_tokens": record.get("output_tokens", 0),
                 "latency_seconds": record.get("latency_seconds", 0),
@@ -414,6 +420,7 @@ def main() -> None:
         "seo_centrality", "geo_centrality", "required_prior_experience", "prior_experience_evidence",
         "seo_background_for_geo", "adjacent_type", "text_completeness", "uncertainty_reason", "concise_rationale",
         "seo_evidence_valid", "geo_evidence_valid", "possible_duty_prior_confusion",
+        "validation_warnings", "evidence_substrings_valid", "provider_schema_exact",
         "input_tokens", "output_tokens", "latency_seconds", "estimated_cost_usd", "attempts",
     ]
     scored = pd.DataFrame(rows, columns=columns)

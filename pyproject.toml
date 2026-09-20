@@ -19,6 +19,8 @@ dependencies = [
 revelio-prepare = "revelio_pilot.prepare:main"
 revelio-run = "revelio_pilot.run_pilot:main"
 revelio-evaluate = "revelio_pilot.evaluate:main"
+revelio-compare-prompts = "revelio_pilot.compare_prompts:main"
+revelio-p1 = "revelio_pilot.p1_production:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -158,7 +158,7 @@ The saved review found the following diagnostic rates:
 
 These percentages describe this deliberately structured review set. They are useful for comparing where models succeed or fail, but they are **not population prevalence estimates**. P1–P4 and the outside strata were intentionally sampled at different rates. Market-wide shares require either weighting from a probability sample or classification and validation of the larger archive.
 
-The current saved judgments also should not be described as final independent human gold labels without an additional human adjudication step. The Excel workbook therefore reports reference-quality problems separately.
+For this pilot, the 300 saved human reviews are frozen as the reference labels. The metrics measure agreement with this reviewed set; they are not population prevalence estimates. The Excel workbook reports quotation or formatting issues separately without changing the saved duty judgments.
 
 ### 2. Freeze the instructions and keep the labels hidden
 
@@ -205,7 +205,7 @@ For SEO and AI-search duties, the workbook reports:
 - **Failure rate:** how often the provider fails or returns unusable output.
 - **Time and cost:** total token use, response time, retries, and estimated API charge.
 
-Model agreement is not treated as truth. Final benchmark labels should be reviewed by people who have not seen the model answers, with disagreements adjudicated before reporting final performance.
+The reference decisions are frozen before model inference. Model disagreements become a follow-up inspection queue; they do not overwrite the saved human judgments.
 
 ## What does not count as SEO or AI-search duty
 
@@ -241,7 +241,7 @@ Prepare all 300 reviewed cases. `data/reviewed_300_input.csv` must contain the p
 python -m revelio_pilot.prepare existing `
   --input data/reviewed_300_input.csv `
   --reference-input data/reviewed_300_labels.csv `
-  --reference-origin saved_review_pending_human_adjudication `
+  --reference-origin human_reviewed_300 `
   --n 300 --seed 20260914 `
   --output data/pilot_reviewed_300.csv `
   --reference-output outputs/private_reference/reference_labels.jsonl
@@ -264,10 +264,45 @@ python -m revelio_pilot.run_pilot `
   --input data/pilot_reviewed_300.csv `
   --config configs/pilot.yaml `
   --phase frozen_test `
+  --run-id pilot-300-v1 `
   --require-prompt-hash <PROMPT_SHA256>
 ```
 
 Do not change the prompt after reviewing model results. Full options are available with `python -m revelio_pilot.prepare --help` and `python -m revelio_pilot.run_pilot --help`.
+
+### Savepoints and safe restart
+
+Keep the same `--run-id` when restarting an interrupted run. The runner creates one atomic checkpoint for every posting-model pair under:
+
+```text
+outputs/runs/<RUN_ID>/checkpoints/
+```
+
+Each checkpoint records the attempt count, received response, token use, estimated cost, validation state, and terminal result. The manifest and usage table are also rewritten atomically as progress is made. On restart, completed pairs are skipped, retry counts and accumulated cost are preserved, and a response that was already received can be validated and committed without another API call. A process lock prevents two copies of the same run from sending duplicate requests. If a shutdown leaves only the final JSONL line incomplete, startup repairs that tail from the durable checkpoint and records the recovery in the manifest; corruption inside a file still stops the run for inspection.
+
+There is one unavoidable edge case: the process can stop while a request is still at the provider, before any response is saved locally. On restart, the runner stops at that pair instead of guessing, because the request may already have been billed. Choose exactly one of the following actions on that first restart.
+
+If a replacement call is intentionally approved, use:
+
+```powershell
+python -m revelio_pilot.run_pilot `
+  --input data/pilot_reviewed_300.csv `
+  --config configs/pilot.yaml `
+  --phase frozen_test `
+  --run-id pilot-300-v1 `
+  --require-prompt-hash <PROMPT_SHA256> `
+  --retry-ambiguous-in-flight
+```
+
+That option is explicit because it can create one duplicate billable call. The output records the ambiguity instead of hiding it.
+
+If the pair should remain a reported API failure with no possible duplicate charge, use the same command with:
+
+```text
+--accept-ambiguous-in-flight-as-failure
+```
+
+This records `interrupted_in_flight` in `failures.jsonl` and continues with the remaining pairs without sending that request again.
 
 Create the Excel evaluation:
 
@@ -280,10 +315,39 @@ python -m revelio_pilot.evaluate `
   --output outputs/runs/<RUN_ID>/evaluation
 ```
 
+### Improved-prompt small pilot
+
+The completed Luna-medium baseline is retained and is not rerun. A versioned
+`improved_v2` prompt adds separate `SEO:` and `GEO:` explanations, tighter external-
+visibility and acronym rules, and an evidence/label consistency contract. The
+candidate config runs only Luna medium on the same 300 postings, and the comparison
+tool produces Excel and HTML reports while separating references marked `FULL`
+from reference/input-scope mismatches.
+
+See [the prompt v2 small-pilot runbook](docs/prompt_v2_small_pilot.md). The relevant
+commands use `--prompt-version improved_v2` and
+`python -m revelio_pilot.compare_prompts`.
+
+## Full P1 expansion
+
+After the small-model comparison, the production choice is
+`gpt-5.6-luna` with `reasoning_effort: medium`. The full-P1 code reuses the
+frozen pilot prompt and validated runner, prepares all 32,972
+`P1_EXPLICIT_AEO_GEO` postings as deterministic shards, supports bounded
+parallel execution and restart, and refuses to consolidate incomplete or
+overlapping results.
+
+See [the P1 Luna-medium runbook](docs/p1_luna_medium_runbook.md). Preparation,
+launch, status, and consolidation are exposed through
+`python -m revelio_pilot.p1_production` (or `revelio-p1` after installation).
+
 ## Data protection
 
 Raw Revelio files, job descriptions, labels, API keys, and run results are ignored by Git. Before calling any provider, confirm that the Revelio agreement and the organization's data policy allow job-posting text to be sent to that provider.
 
 ## Current status
 
-The code, 300-case preparation, stratum preservation, prompt freeze, validation, cost ceiling, Excel export, and evaluation can be tested without paid API calls. A real 900-call comparison has not been run because API credentials have not been supplied.
+The saved 300-case comparison is retained as the baseline. The improved-prompt
+candidate code can be preflighted without paid inference and, when approved, sends
+only the 300 new Luna-medium calls. API credentials stay only in the local ignored
+`.env` file and are never documented in this repository.
