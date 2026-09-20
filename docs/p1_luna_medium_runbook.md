@@ -55,7 +55,7 @@ The launcher itself can also be inspected without starting child processes:
 ```powershell
 python -m revelio_pilot.p1_production launch `
   --prompt-hash <PROMPT_SHA256> `
-  --max-parallel 8 `
+  --max-parallel 32 `
   --dry-run
 ```
 
@@ -64,8 +64,27 @@ python -m revelio_pilot.p1_production launch `
 ```powershell
 python -m revelio_pilot.p1_production launch `
   --prompt-hash <PROMPT_SHA256> `
-  --max-parallel 8
+  --max-parallel 32
 ```
+
+The 32 prepared shards make 32 simultaneous shard processes the practical
+maximum for this run. It is also the default, so `--max-parallel 32` may be
+omitted. A two-second process-start stagger is enabled by default to soften the
+initial traffic ramp without materially changing completion time.
+
+OpenAI's published GPT-5.6 Luna Tier 2 limits are 5,000 requests/minute and
+2,000,000 tokens/minute. Across the completed 300-case `improved_v2` pilot, a
+call averaged 2,268.59 input tokens, 461.97 output tokens, and 4.2467 seconds.
+At 32 workers, the projected steady load is approximately 452 requests/minute
+and 1.235 million observed tokens/minute: about 9% and 62% of the respective
+Tier 2 limits. The no-overhead runtime projection is about 73 minutes, compared
+with about 292 minutes at the previous eight-worker default. These are planning
+estimates, not a throughput guarantee; organization/project traffic shares the
+same limits. The launcher refuses settings above either the prepared shard count
+or the 80%-utilization safety cap calculated from the frozen v2 pilot.
+
+Official references: [GPT-5.6 Luna model and rate limits](https://developers.openai.com/api/docs/models/gpt-5.6-luna)
+and [rate-limit behavior](https://developers.openai.com/api/docs/guides/rate-limits).
 
 `--max-parallel` controls simultaneous shard processes. The config's USD 2.00
 ceiling applies independently to each of the 32 shards, so the aggregate hard

@@ -12,6 +12,25 @@ from revelio_pilot import p1_production
 
 
 class P1ProductionTests(unittest.TestCase):
+    def test_tier2_plan_uses_all_32_prepared_shards_with_headroom(self):
+        plan = p1_production.tier2_parallel_plan(32, 32)
+        self.assertEqual(plan["recommended_cap"], 32)
+        self.assertGreaterEqual(plan["model_safe_cap"], 32)
+        self.assertLess(plan["projected_rpm"], p1_production.TIER2_REQUESTS_PER_MINUTE)
+        self.assertLess(plan["projected_total_tpm"], p1_production.TIER2_TOKENS_PER_MINUTE)
+        self.assertAlmostEqual(plan["projected_minutes"], 72.9, places=1)
+
+    def test_tier2_plan_rejects_non_positive_parallelism(self):
+        with self.assertRaisesRegex(ValueError, "must be positive"):
+            p1_production.tier2_parallel_plan(0, 32)
+
+    def test_launch_parser_defaults_to_all_shards_with_stagger(self):
+        args = p1_production.build_parser().parse_args(
+            ["launch", "--prompt-hash", "abc123", "--dry-run"]
+        )
+        self.assertEqual(args.max_parallel, 32)
+        self.assertEqual(args.start_interval_seconds, 2.0)
+
     def test_stable_shard_is_repeatable_and_bounded(self):
         first = [p1_production.stable_shard(str(value), 32) for value in range(100)]
         second = [p1_production.stable_shard(str(value), 32) for value in range(100)]

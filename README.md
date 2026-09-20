@@ -379,6 +379,12 @@ frozen pilot prompt and validated runner, prepares all 32,972
 parallel execution and restart, and refuses to consolidate incomplete or
 overlapping results.
 
+For GPT-5.6 Luna Tier 2, all 32 prepared shards can run concurrently. The
+launcher now defaults to 32 staggered processes. The completed v2 pilot projects
+about 452 requests/minute and 1.235 million observed tokens/minute at that
+setting, below the published 5,000 RPM and 2,000,000 TPM limits; the no-overhead
+runtime estimate is approximately 73 minutes.
+
 See [the P1 Luna-medium runbook](docs/p1_luna_medium_runbook.md). Preparation,
 launch, status, and consolidation are exposed through
 `python -m revelio_pilot.p1_production` (or `revelio-p1` after installation).
@@ -393,7 +399,9 @@ The 300-case baseline, `improved_v2`, and experimental `improved_v2_1` runs are
 complete. `improved_v2` is frozen for P1 with GPT-5.6 Luna at medium reasoning.
 On 2026-09-20, the local preparation produced 32,972 P1 postings in 32 deterministic
 shards; the full-input preflight and the 32-shard launcher dry-run both passed with
-zero API calls. The generated inputs and all provider outputs remain ignored and
+zero API calls. The launcher was then updated for the Tier 2 rate envelope to use
+all 32 prepared shards concurrently with a staggered start and an 80%-utilization
+safety guard. The generated inputs and all provider outputs remain ignored and
 are not included in GitHub. No paid P1 production calls have been started. API
 credentials stay only in the local ignored `.env` file and are never documented in
 this repository.

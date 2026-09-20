@@ -36,9 +36,23 @@ DEFAULT_CONFIG = "configs/p1_luna_medium.yaml"
 DEFAULT_RUN_PREFIX = "p1-luna-medium"
 DEFAULT_EXPECTED_ROWS = 32_972
 DEFAULT_SHARDS = 32
+DEFAULT_MAX_PARALLEL = 32
+DEFAULT_START_INTERVAL_SECONDS = 2.0
 PREPARATION_VERSION = 1
 CONSOLIDATION_VERSION = 1
 SOURCE_COLUMNS = ["job_id", "title_raw", "jobtitle_translated", "description", "filter_priority"]
+
+# GPT-5.6 Luna Tier 2 limits published by OpenAI on 2026-09-20.
+# The utilization target preserves headroom for latency/token variation and for
+# other traffic sharing the same organization/project limits.
+TIER2_REQUESTS_PER_MINUTE = 5_000
+TIER2_TOKENS_PER_MINUTE = 2_000_000
+TIER2_TARGET_UTILIZATION = 0.80
+
+# Observed across all 300 successful improved_v2 Luna-medium pilot calls.
+V2_MEAN_INPUT_TOKENS = 2_268.586667
+V2_MEAN_OUTPUT_TOKENS = 461.97
+V2_MEAN_LATENCY_SECONDS = 4.246715
 
 
 def project_path(value: str | Path) -> Path:
@@ -99,6 +113,48 @@ def shard_name(index: int, count: int) -> str:
 def run_id(prefix: str, index: int, count: int) -> str:
     width = max(3, len(str(count)))
     return f"{prefix}-shard-{index + 1:0{width}d}-of-{count:0{width}d}"
+
+
+def tier2_parallel_plan(workers: int, shard_count: int) -> dict[str, float | int]:
+    """Project synchronous load from the completed v2 pilot.
+
+    This is a launch guard, not a distributed rate limiter. The one-request-at-
+    a-time shard workers make concurrency a useful conservative control, while
+    the startup interval avoids an instantaneous 32-request burst.
+    """
+    if workers <= 0:
+        raise ValueError("--max-parallel must be positive")
+    if shard_count <= 0:
+        raise ValueError("Prepared shard count must be positive")
+
+    total_tokens = V2_MEAN_INPUT_TOKENS + V2_MEAN_OUTPUT_TOKENS
+    per_worker_rpm = 60.0 / V2_MEAN_LATENCY_SECONDS
+    rpm_safe_cap = int(
+        TIER2_REQUESTS_PER_MINUTE * TIER2_TARGET_UTILIZATION / per_worker_rpm
+    )
+    tpm_safe_cap = int(
+        TIER2_TOKENS_PER_MINUTE
+        * TIER2_TARGET_UTILIZATION
+        / (per_worker_rpm * total_tokens)
+    )
+    model_safe_cap = max(1, min(rpm_safe_cap, tpm_safe_cap))
+    recommended_cap = min(shard_count, model_safe_cap)
+    projected_rpm = workers * per_worker_rpm
+    projected_input_tpm = projected_rpm * V2_MEAN_INPUT_TOKENS
+    projected_total_tpm = projected_rpm * total_tokens
+    projected_minutes = DEFAULT_EXPECTED_ROWS * V2_MEAN_LATENCY_SECONDS / (60.0 * workers)
+    return {
+        "workers": workers,
+        "shard_count": shard_count,
+        "rpm_safe_cap": rpm_safe_cap,
+        "tpm_safe_cap": tpm_safe_cap,
+        "model_safe_cap": model_safe_cap,
+        "recommended_cap": recommended_cap,
+        "projected_rpm": projected_rpm,
+        "projected_input_tpm": projected_input_tpm,
+        "projected_total_tpm": projected_total_tpm,
+        "projected_minutes": projected_minutes,
+    }
 
 
 def load_config(path: Path) -> dict[str, Any]:
@@ -281,8 +337,19 @@ def launch(args: argparse.Namespace) -> None:
     validate_prepared_files(prepared, manifest)
     config_path = project_path(args.config)
     config = load_config(config_path)
-    if args.max_parallel <= 0:
-        raise ValueError("--max-parallel must be positive")
+    shard_count = int(manifest["shard_count"])
+    plan = tier2_parallel_plan(args.max_parallel, shard_count)
+    if args.max_parallel > shard_count:
+        raise ValueError(
+            f"--max-parallel cannot exceed the {shard_count} prepared shards"
+        )
+    if args.max_parallel > plan["model_safe_cap"]:
+        raise ValueError(
+            f"--max-parallel={args.max_parallel} exceeds the v2-based Tier 2 safety cap "
+            f"of {plan['model_safe_cap']} workers"
+        )
+    if args.start_interval_seconds < 0:
+        raise ValueError("--start-interval-seconds must be non-negative")
     current_hash = P1_PROMPT_SHA256
     if args.prompt_hash != current_hash:
         raise ValueError(f"Prompt hash mismatch: current={current_hash}")
@@ -291,6 +358,13 @@ def launch(args: argparse.Namespace) -> None:
     print(
         f"Launching {manifest['rows']:,} P1 postings across {manifest['shard_count']} shards; "
         f"at most {args.max_parallel} processes; aggregate configured ceiling USD {aggregate_cap:.2f}"
+    )
+    print(
+        "Tier 2 v2-pilot projection: "
+        f"{plan['projected_rpm']:.0f}/{TIER2_REQUESTS_PER_MINUTE:,} RPM, "
+        f"{plan['projected_total_tpm']:,.0f}/{TIER2_TOKENS_PER_MINUTE:,} observed tokens/min, "
+        f"about {plan['projected_minutes']:.0f} minutes before overhead; "
+        f"safe model cap={plan['model_safe_cap']}, prepared-shard cap={shard_count}"
     )
     queue: deque[tuple[dict[str, Any], list[str]]] = deque()
     for shard in manifest["shards"]:
@@ -330,6 +404,8 @@ def launch(args: argparse.Namespace) -> None:
                 )
                 active[process.pid] = (process, stdout_handle, stderr_handle, shard)
                 print(f"Started shard {shard['number']}/{manifest['shard_count']} (pid={process.pid})")
+                if queue and len(active) < args.max_parallel and args.start_interval_seconds:
+                    time.sleep(args.start_interval_seconds)
 
             finished = []
             for pid, (process, stdout_handle, stderr_handle, shard) in active.items():
@@ -546,7 +622,13 @@ def build_parser() -> argparse.ArgumentParser:
     launch_parser.add_argument("--config", default=DEFAULT_CONFIG)
     launch_parser.add_argument("--run-prefix", default=DEFAULT_RUN_PREFIX)
     launch_parser.add_argument("--prompt-hash", required=True)
-    launch_parser.add_argument("--max-parallel", type=int, default=8)
+    launch_parser.add_argument("--max-parallel", type=int, default=DEFAULT_MAX_PARALLEL)
+    launch_parser.add_argument(
+        "--start-interval-seconds",
+        type=float,
+        default=DEFAULT_START_INTERVAL_SECONDS,
+        help="Delay between shard-process starts to soften the initial API traffic ramp",
+    )
     launch_parser.add_argument("--dry-run", action="store_true")
     ambiguous = launch_parser.add_mutually_exclusive_group()
     ambiguous.add_argument("--retry-ambiguous-in-flight", action="store_true")
