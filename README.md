@@ -28,37 +28,78 @@ For each posting, the model sees only:
 
 It does not see the researcher's answer, the search group that found the posting, or another model's answer.
 
-## Exact English test prompt
+## Selected production prompt: improved_v2
 
-All three models receive the same English instructions below. This is the exact system prompt stored in `src/revelio_pilot/prompt.py`, not a simplified description. Keeping one common prompt makes the comparison fair.
+The original three-model trial used `baseline_v1`. After that trial, two revised
+prompts were tested with the same 300 postings, the same `gpt-5.6-luna` model,
+medium reasoning, frozen reference labels, and the same operational survival rule.
+Only the candidate prompt was rerun; the saved baseline was reused.
+
+| Scope and measure | improved_v2 | improved_v2_1 |
+|---|---:|---:|
+| Overall survival recall | **116/117 (99.15%)** | 113/117 (96.58%) |
+| P1 survival recall | **45/45 (100.00%)** | 44/45 (97.78%) |
+| P1 with full reference text: survival recall | **41/41 (100.00%)** | 40/41 (97.56%) |
+| Overall operational group accuracy | **91.67%** | 90.33% |
+| Successful calls | 300/300 | 300/300 |
+| Recorded API cost | **USD 0.3024** | USD 0.3166 |
+
+`improved_v2_1` produced stronger evidence-contract rates in some P1 subsets and
+higher exact group agreement for `P1_REFERENCE_FULL`. However, it screened out
+four reference-relevant postings overall, including one P1 posting. `improved_v2`
+screened out one reference-relevant posting overall and none in P1. Because the
+larger run is a high-recall first pass, survival recall takes priority over a small
+gain in exact agreement or evidence formatting. The selected P1 production prompt
+is therefore `improved_v2`, not `improved_v2_1`.
+
+The frozen prompt-and-schema bundle hash is:
+
+```text
+abb390da6886d326901544f771cde7f82a94d952f96eb91df3ac4f46d4cf8f2f
+```
+
+The exact selected English system prompt below is stored in
+`src/revelio_pilot/prompt.py`. `baseline_v1` and the experimental
+`improved_v2_1` remain versioned in that file for reproducibility, but P1
+explicitly freezes `improved_v2`.
 
 <details>
 <summary>Show the complete system prompt</summary>
 
 ```text
-You are independently reviewing a job posting for a research study of employer demand for SEO and AI-search visibility work.
+You are independently reviewing a job posting for a research study of employer demand for SEO and AI-search visibility work. Classify assigned work, not keyword presence.
 
-Judge only CURRENT DUTIES assigned to the worker. Do not infer a duty from qualifications, prior experience, an employer description, a product description, page chrome, or keywords alone.
+Use the supplied title and description together.
 
-SEO duty = improving a website's or content's organic visibility, ranking, indexing, discoverability, or traffic in external search engines.
+1. Check text completeness first.
+- FULL: the operative duties are present and readable, even if boilerplate is omitted.
+- PARTIAL: the text itself is cut off or omits a material duties section, so at least one duty cannot be resolved.
+- UNREADABLE: blank, corrupted, or not meaningfully interpretable.
+Do not infer truncation from length alone. If missing or contradictory text prevents a decision for either duty, mark that duty UNCERTAIN and make summary_group UNCERTAIN. Do not turn absent evidence in incomplete text into NO.
 
-GEO duty = improving or measuring discovery, citations, recommendations, or inclusion in AI-generated answers or AI-search systems. Treat AEO and generative-engine optimization as GEO only when they refer to external AI-search visibility.
+2. Attribute the work to the worker.
+Count only a current action, ownership area, deliverable, or measured outcome assigned to this role. Do not infer a duty from prior experience, qualifications, preferred skills, employer capabilities, product descriptions, page chrome, or a keyword alone. A title can support a duty only when it clearly names the function and the description is compatible; an unexplained acronym in weak or unrelated context is not enough.
 
-Do NOT count internal product search/retrieval/ranking engineering, paid search or SEM alone, marketplace/app-store search alone, AI used only to create content, sales of SEO/GEO services, prior experience alone, qualification-only mentions, company capabilities, or geographic meanings of GEO.
+3. Judge SEO and GEO independently.
+- SEO duty: improve or measure a website's or content's organic visibility, ranking, indexing, discoverability, or traffic in external conventional search engines. Strong cues include organic search, Google/SERP rankings, crawling/indexing, technical SEO, keyword optimization, and SEO performance.
+- GEO duty: improve or measure public content's discovery, citation, recommendation, or inclusion in external AI-generated answers or AI-search systems. Strong cues include AI-generated answers, answer engines, LLM discoverability, AI-powered search results, citation/share-of-voice in systems such as ChatGPT or Perplexity, and structuring public content for those systems.
+- AEO, GEO, or generative-engine optimization counts as GEO when it is an assigned workstream in an external search/content visibility context. If the acronym's meaning or external target remains materially ambiguous, use UNCERTAIN rather than assuming YES.
+- Generic "search," discoverability, personalization, recommendations, or content consumption does not establish SEO or GEO without the relevant external target.
 
-Assess SEO and GEO independently. A posting may contain one, both, neither, or insufficient evidence for either duty. If either duty cannot be resolved because the posting is missing, unreadable, materially incomplete, or contradictory, use UNCERTAIN for that duty and UNCERTAIN for summary_group. Do not turn missing evidence into NO.
+4. Apply exclusions by context.
+Do not count internal product search, retrieval, ranking, RAG, recommendation, or model engineering; paid search or SEM alone; marketplace/app-store search alone; AI used only to create content; sales or promotion of SEO/GEO services without ownership of delivery or results; qualification-only mentions; company capabilities; or geographic meanings of GEO. Managing or executing client SEO/GEO delivery can count when the role owns that work or its outcomes.
 
-Centrality must be PRIMARY or SECONDARY when a duty is YES, NOT_APPLICABLE when it is NO, and UNCLEAR when it is UNCERTAIN.
+5. Complete the fields consistently.
+- For a YES duty, centrality is PRIMARY or SECONDARY and evidence is a short exact substring that contains the assigned action and relevant target when possible.
+- For a NO duty, centrality is NOT_APPLICABLE and evidence is an empty string.
+- For an UNCERTAIN duty, centrality is UNCLEAR and uncertainty_reason names the missing or ambiguous fact. Evidence may quote the ambiguous phrase exactly, or be empty when the problem is missing text.
+- Evidence must be copied verbatim from the supplied title or description. Do not repair spelling, punctuation, capitalization, whitespace, or HTML entities.
+- summary_group is derived from the two duty decisions: BOTH, SEO_ONLY, GEO_ONLY, NEITHER, or UNCERTAIN when either duty is UNCERTAIN.
+- required_prior_experience summarizes explicit required or preferred prior work experience; use NO when none is stated. prior_experience_evidence is one exact quote, or an empty string when none is stated.
+- seo_background_for_geo is EXPLICIT or SUGGESTIVE only when the posting connects prior SEO background to current GEO work; otherwise NO_EVIDENCE.
+- adjacent_type is one concise uppercase exclusion category when useful, such as PAID_SEARCH, INTERNAL_PRODUCT_SEARCH, INTERNAL_AI_PRODUCT, MARKETPLACE_SEARCH, AI_CONTENT_CREATION, SALES_SERVICE, QUALIFICATION_ONLY, PAGE_CHROME, or GEOGRAPHIC_GEO; otherwise use an empty string.
 
-Evidence must be a short exact substring copied verbatim from the supplied title or description. Use an empty string when there is no evidence. Do not repair spelling, punctuation, capitalization, whitespace, or HTML entities inside a quote.
-
-seo_background_for_geo describes whether the posting connects prior SEO background to current GEO work: EXPLICIT, SUGGESTIVE, or NO_EVIDENCE. It does not claim that a worker actually changed occupations.
-
-adjacent_type is a concise uppercase category only when useful to explain excluded nearby work, such as PAID_SEARCH, INTERNAL_PRODUCT_SEARCH, MARKETPLACE_SEARCH, AI_CONTENT_CREATION, SALES_SERVICE, QUALIFICATION_ONLY, PAGE_CHROME, or GEOGRAPHIC_GEO. Otherwise return an empty string.
-
-text_completeness is FULL, PARTIAL, or UNREADABLE.
-
-Return only one JSON object matching the supplied schema. concise_rationale must be 1-3 sentences.
+Return only one JSON object matching the supplied schema. concise_rationale must contain exactly two labeled sentences in this order: "SEO: <YES|NO|UNCERTAIN> — <why>. GEO: <YES|NO|UNCERTAIN> — <why>." For YES, name the assigned action and external target. For NO, name the decisive exclusion or state that the complete posting assigns no such external-visibility work. For UNCERTAIN, name the exact ambiguity or missing section. Explain the decision; do not merely repeat the label or evidence quote.
 ```
 
 </details>
@@ -317,12 +358,13 @@ python -m revelio_pilot.evaluate `
 
 ### Improved-prompt small pilot
 
-The completed Luna-medium baseline is retained and is not rerun. A versioned
-`improved_v2` prompt adds separate `SEO:` and `GEO:` explanations, tighter external-
-visibility and acronym rules, and an evidence/label consistency contract. The
-candidate config runs only Luna medium on the same 300 postings, and the comparison
-tool produces Excel and HTML reports while separating references marked `FULL`
-from reference/input-scope mismatches.
+The completed Luna-medium baseline was retained rather than rerun. The versioned
+`improved_v2` prompt added separate `SEO:` and `GEO:` explanations, tighter external-
+visibility and acronym rules, and an evidence/label consistency contract. Both
+`improved_v2` and the later experimental `improved_v2_1` were run on the same 300
+postings. The comparison above selects `improved_v2` because it achieved the best
+overall and P1 survival recall. The comparison tool produces Excel and HTML reports
+while separating references marked `FULL` from reference/input-scope mismatches.
 
 See [the prompt v2 small-pilot runbook](docs/prompt_v2_small_pilot.md). The relevant
 commands use `--prompt-version improved_v2` and
@@ -347,7 +389,11 @@ Raw Revelio files, job descriptions, labels, API keys, and run results are ignor
 
 ## Current status
 
-The saved 300-case comparison is retained as the baseline. The improved-prompt
-candidate code can be preflighted without paid inference and, when approved, sends
-only the 300 new Luna-medium calls. API credentials stay only in the local ignored
-`.env` file and are never documented in this repository.
+The 300-case baseline, `improved_v2`, and experimental `improved_v2_1` runs are
+complete. `improved_v2` is frozen for P1 with GPT-5.6 Luna at medium reasoning.
+On 2026-09-20, the local preparation produced 32,972 P1 postings in 32 deterministic
+shards; the full-input preflight and the 32-shard launcher dry-run both passed with
+zero API calls. The generated inputs and all provider outputs remain ignored and
+are not included in GitHub. No paid P1 production calls have been started. API
+credentials stay only in the local ignored `.env` file and are never documented in
+this repository.
